@@ -8,7 +8,7 @@ RUN apt-get update && \
     apt-get install -y systemd systemd-sysv dbus dbus-user-session && \
     printf "systemctl start systemd-logind" >> /etc/profile
 
-RUN echo "instance-id: servertipacvn\nlocal-hostname: idlernetwork" > /cloud-init/meta-data
+RUN echo "instance-id: idlernetwork\nlocal-hostname: idlernetwork" > /cloud-init/meta-data
 
 # Write user-data with working root login and password 'root'
 RUN printf "#cloud-config\n\
@@ -33,4 +33,5 @@ runcmd:\n\
 
 CMD ["bash"]
 ENTRYPOINT ["/sbin/init"]
+
 
