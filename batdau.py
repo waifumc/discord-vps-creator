@@ -8,13 +8,19 @@ import time
 import concurrent.futures
 import discord
 from discord.ext import commands, tasks
-import docker
 import asyncio
 from discord import app_commands
+from dotenv import load_dotenv
+
+# === TẢI TOKEN TỪ .env ===
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    print("❌ Lỗi: Không tìm thấy DISCORD_TOKEN trong .env")
+    sys.exit(1)
 
 # === CẤU HÌNH ===
-TOKEN = 'MTQwNzk3NzQwMTc3ODE3NjA1Mg.Gtogyt.L232K1xbf2U6GSu3Mai07FQX8whA4srQA9cdgg'  # NHẬP TOKEN VÀO ĐÂY
-SERVER_LIMIT = 100
+SERVER_LIMIT = 12
 database_file = 'database.txt'
 
 # === BOT SETUP ===
@@ -23,7 +29,6 @@ intents.messages = False
 intents.message_content = False
 
 bot = commands.Bot(command_prefix='/', intents=intents)
-client = docker.from_env()
 
 # === HÀM HỖ TRỢ ===
 def generate_random_port():
@@ -110,7 +115,7 @@ async def capture_ssh_session_line(process):
             return output.split("ssh session:")[1].strip()
     return None
 
-# === CÁC HÀM QUẢN LÝ MÁY CHỦ ===
+# === TẠO MÁY CHỦ ===
 async def create_server_task(interaction, image_name, os_name):
     await interaction.response.send_message(embed=discord.Embed(description="🛠️ Đang tạo máy chủ...", color=0x00ff00))
     user = str(interaction.user)
@@ -118,13 +123,12 @@ async def create_server_task(interaction, image_name, os_name):
         await interaction.followup.send(embed=discord.Embed(description="❌ Đã đạt giới hạn 12 máy chủ.", color=0xff0000))
         return
 
-    # Tạo tên container duy nhất
     base_name = sanitize_username(user)
     container_name = f"cloud_{base_name}_{random.randint(1000, 9999)}"
     password = generate_password()
 
     try:
-        # Chạy container với systemd
+        # Chạy container
         subprocess.run([
             "docker", "run", "-d",
             "--privileged",
@@ -138,10 +142,22 @@ async def create_server_task(interaction, image_name, os_name):
             image_name
         ], check=True, capture_output=True)
 
-        # Đổi mật khẩu root
-        subprocess.run([
+        # ⏳ Chờ 10s để systemd khởi động
+        await asyncio.sleep(10)
+
+        # Kiểm tra container có đang chạy không
+        result = subprocess.run(["docker", "ps", "-q", "-f", f"name={container_name}", "-f", "status=running"], 
+                                capture_output=True, text=True)
+        if not result.stdout.strip():
+            raise Exception("Container không chạy hoặc đã bị lỗi khởi động")
+
+        # ✅ Đổi mật khẩu root
+        result = subprocess.run([
             "docker", "exec", container_name, "bash", "-c", f"echo 'root:{password}' | chpasswd"
-        ], check=True)
+        ], capture_output=True)
+        if result.returncode != 0:
+            error = result.stderr.decode()
+            raise Exception(f"Không thể đổi mật khẩu: {error}")
 
         # Chạy tmate để lấy SSH
         exec_cmd = await asyncio.create_subprocess_exec(
@@ -168,13 +184,16 @@ async def create_server_task(interaction, image_name, os_name):
         error_msg = e.stderr.decode() if e.stderr else str(e)
         await interaction.followup.send(embed=discord.Embed(description=f"❌ Lỗi Docker: {error_msg}", color=0xff0000))
         subprocess.run(["docker", "rm", "-f", container_name])
+    except Exception as e:
+        await interaction.followup.send(embed=discord.Embed(description=f"❌ Lỗi: {e}", color=0xff0000))
+        subprocess.run(["docker", "rm", "-f", container_name])
 
 @bot.tree.command(name="deploy-ubuntu", description="Tạo máy chủ Ubuntu 22.04")
 async def deploy_ubuntu(interaction: discord.Interaction):
     await create_server_task(interaction, "ubuntu-22.04-with-tmate", "Ubuntu 22.04")
 
 @bot.tree.command(name="deploy-debian", description="Tạo máy chủ Debian 12")
-async def deploy_debian(interaction: discord.Interaction):  # ← Đã sửa tên
+async def deploy_debian(interaction: discord.Interaction):
     await create_server_task(interaction, "debian-with-tmate", "Debian 12")
 
 # === Regen SSH ===
@@ -187,6 +206,7 @@ async def regen_ssh_command(interaction: discord.Interaction, identifier: str):
     container_name, _, password = info
 
     try:
+        # Chạy lại tmate
         exec_cmd = await asyncio.create_subprocess_exec(
             "docker", "exec", container_name, "tmate", "-F",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -216,6 +236,8 @@ async def start_server(interaction: discord.Interaction, identifier: str):
 
     try:
         subprocess.run(["docker", "start", container_name], check=True)
+        await asyncio.sleep(5)  # Chờ khởi động
+
         exec_cmd = await asyncio.create_subprocess_exec(
             "docker", "exec", container_name, "tmate", "-F",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -262,6 +284,7 @@ async def restart(interaction: discord.Interaction, identifier: str):
     container_name, _, password = info
     try:
         subprocess.run(["docker", "restart", container_name], check=True)
+        await asyncio.sleep(5)
         exec_cmd = await asyncio.create_subprocess_exec(
             "docker", "exec", container_name, "tmate", "-F",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -307,6 +330,45 @@ async def remove_server(interaction: discord.Interaction, identifier: str):
     except subprocess.CalledProcessError as e:
         await interaction.response.send_message(embed=discord.Embed(description=f"❌ Lỗi: {e}", color=0xff0000))
 
+# === Debug ===
+@bot.tree.command(name="debug", description="Kiểm tra trạng thái container")
+@app_commands.describe(container_name="Tên container")
+async def debug(interaction: discord.Interaction, container_name: str):
+    try:
+        result = subprocess.run(["docker", "ps", "-a", "--filter", f"name={container_name}", "--format", "{{.Names}} {{.Status}}"], 
+                                capture_output=True, text=True)
+        if result.stdout.strip():
+            await interaction.response.send_message(embed=discord.Embed(description=f"```\n{result.stdout.strip()}\n```", color=0x00ff00))
+        else:
+            await interaction.response.send_message(embed=discord.Embed(description="❌ Không tìm thấy container.", color=0xff0000))
+    except Exception as e:
+        await interaction.response.send_message(embed=discord.Embed(description=f"❌ Lỗi: {e}", color=0xff0000))
+
+# === Cleanup ===
+@bot.tree.command(name="cleanup", description="Dọn dẹp database (xóa container không tồn tại)")
+async def cleanup(interaction: discord.Interaction):
+    if not os.path.exists(database_file):
+        await interaction.response.send_message("❌ Không có database để dọn dẹp.")
+        return
+
+    with open(database_file, 'r') as f:
+        lines = f.readlines()
+
+    with open(database_file, 'w') as f:
+        removed = 0
+        for line in lines:
+            parts = line.strip().split('|')
+            if len(parts) < 2:
+                continue
+            container_name = parts[1]
+            result = subprocess.run(["docker", "inspect", container_name], capture_output=True)
+            if result.returncode == 0:
+                f.write(line)
+            else:
+                removed += 1
+
+    await interaction.response.send_message(f"✅ Đã dọn dẹp {removed} máy chủ không tồn tại.")
+
 # === Ping ===
 @bot.tree.command(name="ping", description="Kiểm tra độ trễ")
 async def ping(interaction: discord.Interaction):
@@ -326,27 +388,9 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/remove <tên>", value="Xóa máy chủ", inline=False)
     embed.add_field(name="/list", value="Xem danh sách", inline=False)
     embed.add_field(name="/ping", value="Kiểm tra độ trễ", inline=False)
-    embed.add_field(name="/port-http", value="Chuyển tiếp HTTP", inline=False)
-    embed.add_field(name="/port-add", value="Chuyển tiếp cổng", inline=False)
+    embed.add_field(name="/debug <tên>", value="Kiểm tra trạng thái container", inline=False)
+    embed.add_field(name="/cleanup", value="Dọn dẹp database", inline=False)
     await interaction.response.send_message(embed=embed)
-
-# === Port Forwarding ===
-PUBLIC_IP = '138.68.79.95'
-
-@bot.tree.command(name="port-add", description="Chuyển tiếp cổng")
-@app_commands.describe(container_name="Tên container", container_port="Cổng trong container")
-async def port_add(interaction: discord.Interaction, container_name: str, container_port: int):
-    await interaction.response.send_message(embed=discord.Embed(description="🔧 Đang thiết lập...", color=0x00ff00))
-    public_port = generate_random_port()
-    command = f"ssh -o StrictHostKeyChecking=no -R {public_port}:localhost:{container_port} serveo.net -N -f"
-    try:
-        await asyncio.create_subprocess_exec(
-            "docker", "exec", container_name, "bash", "-c", command,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-        )
-        await interaction.followup.send(embed=discord.Embed(description=f"✅ Thành công! Truy cập tại `{PUBLIC_IP}:{public_port}`", color=0x00ff00))
-    except Exception as e:
-        await interaction.followup.send(embed=discord.Embed(description=f"❌ Lỗi: {e}", color=0xff0000))
 
 # === Chạy bot ===
 bot.run(TOKEN)
