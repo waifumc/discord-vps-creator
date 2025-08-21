@@ -10,17 +10,10 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 from discord import app_commands
-from dotenv import load_dotenv
 
-# === TẢI TOKEN TỪ .env ===
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-if not TOKEN:
-    print("❌ Lỗi: Không tìm thấy DISCORD_TOKEN trong .env")
-    sys.exit(1)
-
+TOKEN = ''
 # === CẤU HÌNH ===
-SERVER_LIMIT = 12
+SERVER_LIMIT = 100
 database_file = 'database.txt'
 
 # === BOT SETUP ===
