@@ -8,5 +8,29 @@ RUN apt-get update && \
     apt-get install -y systemd systemd-sysv dbus dbus-user-session && \
     printf "systemctl start systemd-logind" >> /etc/profile
 
+RUN echo "instance-id: servertipacvn\nlocal-hostname: idlernetwork" > /cloud-init/meta-data
+
+# Write user-data with working root login and password 'root'
+RUN printf "#cloud-config\n\
+preserve_hostname: false\n\
+hostname: idlernetwork\n\
+users:\n\
+  - name: root\n\
+    gecos: root\n\
+    shell: /bin/bash\n\
+    lock_passwd: false\n\
+    passwd: \$6\$abcd1234\$W6wzBuvyE.D1mBGAgQw2uvUO/honRrnAGjFhMXSk0LUbZosYtoHy1tUtYhKlALqIldOGPrYnhSrOfAknpm91i0\n\
+    sudo: ALL=(ALL) NOPASSWD:ALL\n\
+disable_root: false\n\
+ssh_pwauth: true\n\
+chpasswd:\n\
+  list: |\n\
+    root:root\n\
+  expire: false\n\
+runcmd:\n\
+  - systemctl enable ssh\n\
+  - systemctl restart ssh\n" > /cloud-init/user-data
+
 CMD ["bash"]
 ENTRYPOINT ["/sbin/init"]
+
