@@ -1,37 +1,42 @@
+# Dockerfile
 FROM ubuntu:22.04
 
+# Không hiển thị hỏi khi cài gói
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Cập nhật và cài đặt các gói cần thiết
 RUN apt-get update && \
-    apt-get install -y tmate openssh-server openssh-client && \
-    sudo sed -i 's/^#\?\s*PermitRootLogin\s\+.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    echo 'root:root' | chpasswd && \
-    printf '#!/bin/sh\nexit 0' > /usr/sbin/policy-rc.d && \
-    apt-get install -y systemd systemd-sysv dbus dbus-user-session && \
-    printf "systemctl start systemd-logind" >> /etc/profile
+    apt-get install -y \
+    tmate \
+    openssh-server \
+    openssh-client \
+    sudo \
+    systemd \
+    systemd-sysv \
+    dbus \
+    dbus-user-session \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN echo "instance-id: idlernetwork\nlocal-hostname: idlernetwork" > /cloud-init/meta-data
+# Tạo các thư mục cần thiết cho systemd
+VOLUME [ "/sys/fs/cgroup" ]
 
-# Write user-data with working root login and password 'root'
-RUN printf "#cloud-config\n\
-preserve_hostname: false\n\
-hostname: idlernetwork\n\
-users:\n\
-  - name: root\n\
-    gecos: root\n\
-    shell: /bin/bash\n\
-    lock_passwd: false\n\
-    passwd: \$6\$abcd1234\$W6wzBuvyE.D1mBGAgQw2uvUO/honRrnAGjFhMXSk0LUbZosYtoHy1tUtYhKlALqIldOGPrYnhSrOfAknpm91i0\n\
-    sudo: ALL=(ALL) NOPASSWD:ALL\n\
-disable_root: false\n\
-ssh_pwauth: true\n\
-chpasswd:\n\
-  list: |\n\
-    root:root\n\
-  expire: false\n\
-runcmd:\n\
-  - systemctl enable ssh\n\
-  - systemctl restart ssh\n" > /cloud-init/user-data
+# Cấu hình SSH
+RUN mkdir -p /run/sshd && \
+    sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    echo 'root:root' | chpasswd
 
-CMD ["bash"]
-ENTRYPOINT ["/sbin/init"]
+# Đảm bảo không có lỗi khi chạy systemctl
+RUN printf '#!/bin/sh\nexit 0' > /usr/sbin/policy-rc.d && \
+    chmod +x /usr/sbin/policy-rc.d
 
+# Đặt hostname
+RUN echo "idlernetwork" > /etc/hostname && \
+    echo "127.0.0.1 idlernetwork" >> /etc/hosts
 
+# Kích hoạt SSH service khi khởi động
+RUN systemctl enable ssh
+
+# Khởi động systemd
+CMD ["/sbin/init"]
