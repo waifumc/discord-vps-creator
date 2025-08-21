@@ -13,8 +13,8 @@ import asyncio
 from discord import app_commands
 
 # === CẤU HÌNH ===
-TOKEN = 'YOUR_BOT_TOKEN_HERE'  # NHẬP TOKEN VÀO ĐÂY
-SERVER_LIMIT = 12
+TOKEN = 'MTQwNzk3NzQwMTc3ODE3NjA1Mg.Gtogyt.L232K1xbf2U6GSu3Mai07FQX8whA4srQA9cdgg'  # NHẬP TOKEN VÀO ĐÂY
+SERVER_LIMIT = 100
 database_file = 'database.txt'
 
 # === BOT SETUP ===
