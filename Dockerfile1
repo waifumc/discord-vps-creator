@@ -1,10 +1,8 @@
 # Dockerfile
 FROM ubuntu:22.04
 
-# Không hiển thị hỏi khi cài gói
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Cập nhật và cài đặt các gói cần thiết
 RUN apt-get update && \
     apt-get install -y \
     tmate \
@@ -18,16 +16,15 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Tạo các thư mục cần thiết cho systemd
-VOLUME [ "/sys/fs/cgroup" ]
+# Tạo thư mục cần thiết
+RUN mkdir -p /run/sshd
 
 # Cấu hình SSH
-RUN mkdir -p /run/sshd && \
-    sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+RUN sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     echo 'root:root' | chpasswd
 
-# Đảm bảo không có lỗi khi chạy systemctl
+# Fix policy-rc.d để không báo lỗi khi chạy systemctl
 RUN printf '#!/bin/sh\nexit 0' > /usr/sbin/policy-rc.d && \
     chmod +x /usr/sbin/policy-rc.d
 
@@ -35,7 +32,7 @@ RUN printf '#!/bin/sh\nexit 0' > /usr/sbin/policy-rc.d && \
 RUN echo "idlernetwork" > /etc/hostname && \
     echo "127.0.0.1 idlernetwork" >> /etc/hosts
 
-# Kích hoạt SSH service khi khởi động
+# Kích hoạt SSH
 RUN systemctl enable ssh
 
 # Khởi động systemd
